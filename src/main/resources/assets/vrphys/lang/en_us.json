@@ -1,0 +1,9 @@
+{
+  "vrphys.configuration.title": "VRPhys Configs",
+  "vrphys.configuration.section.vrphys.common.toml": "VRPhys Configs",
+  "vrphys.configuration.section.vrphys.common.toml.title": "VRPhys Configs",
+  "vrphys.configuration.enableSableCompat": "Enable Sable Compatibility",
+  "vrphys.configuration.enableVivecraftCompat": "Enable Vivecraft Compatibility",
+  "vrphys.configuration.enableImmersiveMcCompat": "Enable ImmersiveMC Compatibility",
+  "vrphys.configuration.debugLogging": "Debug Logging"
+}
