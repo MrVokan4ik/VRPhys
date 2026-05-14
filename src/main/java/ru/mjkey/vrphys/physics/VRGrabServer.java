@@ -275,7 +275,10 @@ public final class VRGrabServer {
 
         // Ensure shortest-arc (angle ≤ π).
         if (errorQ.w < 0.0) {
-            errorQ.negate();
+            errorQ.x = -errorQ.x;
+            errorQ.y = -errorQ.y;
+            errorQ.z = -errorQ.z;
+            errorQ.w = -errorQ.w;
         }
 
         // Convert to axis-angle vector: angularError = axis * angle (world space).
