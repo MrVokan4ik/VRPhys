@@ -5,5 +5,12 @@
   "vrphys.configuration.enableSableCompat": "Совместимость с Sable",
   "vrphys.configuration.enableVivecraftCompat": "Совместимость с Vivecraft",
   "vrphys.configuration.enableImmersiveMcCompat": "Совместимость с ImmersiveMC",
-  "vrphys.configuration.debugLogging": "Отладочные логи"
+  "vrphys.configuration.debugLogging": "Отладочные логи",
+  "vrphys.configuration.grabRadius": "Радиус захвата",
+  "vrphys.configuration.springStiffness": "Жёсткость пружины",
+  "vrphys.configuration.springDamping": "Демпфирование пружины",
+  "vrphys.configuration.maxForcePerHand": "Максимальная сила на руку",
+  "vrphys.configuration.throwVelocityScale": "Множитель скорости броска",
+  "vrphys.configuration.maxThrowVelocity": "Максимальная скорость броска",
+  "vrphys.configuration.debugGrabLogging": "Отладка VR-захвата"
 }

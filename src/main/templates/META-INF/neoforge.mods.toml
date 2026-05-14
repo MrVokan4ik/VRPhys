@@ -10,7 +10,7 @@ displayName="${mod_name}"
 displayURL="https://github.com/MjKey/VRPhys"
 authors="MjKey"
 description='''
-VRPhys experiments with a bridge between VR tracking, Minecraft physics mods, and moving sub-level spaces.
+VRPhys lets VR players physically grab, drag, and throw Sable sub-level constructions.
 '''
 
 [[mixins]]
@@ -32,7 +32,7 @@ config="${mod_id}.mixins.json"
 
 [[dependencies.${mod_id}]]
     modId="sable"
-    type="optional"
+    type="required"
     ordering="AFTER"
     side="BOTH"
 

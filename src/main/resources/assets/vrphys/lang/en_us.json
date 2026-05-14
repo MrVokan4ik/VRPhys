@@ -5,5 +5,12 @@
   "vrphys.configuration.enableSableCompat": "Enable Sable Compatibility",
   "vrphys.configuration.enableVivecraftCompat": "Enable Vivecraft Compatibility",
   "vrphys.configuration.enableImmersiveMcCompat": "Enable ImmersiveMC Compatibility",
-  "vrphys.configuration.debugLogging": "Debug Logging"
+  "vrphys.configuration.debugLogging": "Debug Logging",
+  "vrphys.configuration.grabRadius": "Grab Radius",
+  "vrphys.configuration.springStiffness": "Spring Stiffness",
+  "vrphys.configuration.springDamping": "Spring Damping",
+  "vrphys.configuration.maxForcePerHand": "Max Force Per Hand",
+  "vrphys.configuration.throwVelocityScale": "Throw Velocity Scale",
+  "vrphys.configuration.maxThrowVelocity": "Max Throw Velocity",
+  "vrphys.configuration.debugGrabLogging": "Debug Grab Logging"
 }

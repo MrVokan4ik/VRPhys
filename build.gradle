@@ -142,6 +142,9 @@ configurations {
 }
 
 dependencies {
+    compileOnly "curse.maven:sable-1312371:${sable_neoforge_file_id}"
+    localRuntime "curse.maven:sable-1312371:${sable_neoforge_file_id}"
+
     jarJar(api("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:[${sable_companion_version},)")) {
         version {
             prefer sable_companion_version
