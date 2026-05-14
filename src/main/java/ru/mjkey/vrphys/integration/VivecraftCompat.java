@@ -57,6 +57,8 @@ public final class VivecraftCompat {
             debug("Vivecraft API class was not found");
         } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException exception) {
             VRPhys.LOGGER.warn("Failed to initialize Vivecraft API bridge", exception);
+        } catch (LinkageError error) {
+            VRPhys.LOGGER.warn("Vivecraft API binary is incompatible with this version of VRPhys — integration disabled", error);
         }
 
         apiInstance = null;
@@ -70,6 +72,12 @@ public final class VivecraftCompat {
             return method.invoke(apiInstance, player);
         } catch (IllegalAccessException | InvocationTargetException exception) {
             VRPhys.LOGGER.warn("Vivecraft API call failed for {}", player.getGameProfile().getName(), exception);
+            return null;
+        } catch (LinkageError error) {
+            VRPhys.LOGGER.warn("Vivecraft API linkage failure — disabling integration", error);
+            apiInstance = null;
+            isVrPlayerMethod = null;
+            getVrPoseMethod = null;
             return null;
         }
     }

@@ -34,12 +34,18 @@ import ru.mjkey.vrphys.network.payload.GrabStartC2S;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class VRGrabServer {
     private static final double MAX_HAND_DISTANCE_FROM_PLAYER = 8.0D;
     private static final double MAX_HAND_DISTANCE_FROM_PLAYER_SQUARED =
             MAX_HAND_DISTANCE_FROM_PLAYER * MAX_HAND_DISTANCE_FROM_PLAYER;
     private static final Map<GrabKey, GrabSession> SESSIONS = new ConcurrentHashMap<>();
+
+    // VR-status cache: avoid reflection on every physics tick.
+    // Keyed by game-tick; cleared whenever the tick counter advances.
+    private static final AtomicLong VR_CACHE_TICK = new AtomicLong(Long.MIN_VALUE);
+    private static final Map<UUID, Boolean> VR_PLAYER_CACHE = new ConcurrentHashMap<>();
 
     private VRGrabServer() {
     }
@@ -148,6 +154,7 @@ public final class VRGrabServer {
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         SESSIONS.clear();
+        VR_PLAYER_CACHE.clear();
     }
 
     private static ServerSubLevel findServerTarget(ServerPlayer player, Vec3 handPos) {
@@ -165,16 +172,28 @@ public final class VRGrabServer {
     private static boolean isSessionStillValid(ServerPlayer player, GrabSession session) {
         return player.isAlive()
                 && player.level().dimension().equals(session.levelKey)
-                && VivecraftCompat.isVrPlayer(player)
+                && isVrPlayerThisTick(player)
                 && isFinite(session.handPos)
                 && player.position().distanceToSqr(session.handPos) <= MAX_HAND_DISTANCE_FROM_PLAYER_SQUARED;
     }
 
     private static boolean isValidPlayerPose(ServerPlayer player, Vec3 handPos, Vec3 handDir) {
-        return VivecraftCompat.isVrPlayer(player)
+        return isVrPlayerThisTick(player)
                 && isFinite(handPos)
                 && isFinite(handDir)
                 && player.position().distanceToSqr(handPos) <= MAX_HAND_DISTANCE_FROM_PLAYER_SQUARED;
+    }
+
+    /**
+     * Returns the VR status of the player, cached for the current game tick.
+     * Avoids a reflective Vivecraft API call on every physics tick per active session.
+     */
+    private static boolean isVrPlayerThisTick(ServerPlayer player) {
+        long now = player.serverLevel().getGameTime();
+        if (VR_CACHE_TICK.getAndSet(now) != now) {
+            VR_PLAYER_CACHE.clear();
+        }
+        return VR_PLAYER_CACHE.computeIfAbsent(player.getUUID(), id -> VivecraftCompat.isVrPlayer(player));
     }
 
     private static void applySpring(SubLevelPhysicsSystem physicsSystem, ServerSubLevel subLevel, GrabSession session, double timeStep) {
