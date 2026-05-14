@@ -6,9 +6,10 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Quaternionf;
 import ru.mjkey.vrphys.VRPhys;
 
-public record GrabStartC2S(InteractionHand hand, Vec3 handPos, Vec3 handDir) implements CustomPacketPayload {
+public record GrabStartC2S(InteractionHand hand, Vec3 handPos, Vec3 handDir, Quaternionf handRot) implements CustomPacketPayload {
     public static final Type<GrabStartC2S> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(VRPhys.MODID, "grab_start")
     );
@@ -17,11 +18,11 @@ public record GrabStartC2S(InteractionHand hand, Vec3 handPos, Vec3 handDir) imp
 
     private static GrabStartC2S read(RegistryFriendlyByteBuf buffer) {
         GrabPayloadCodecs.HandPose pose = GrabPayloadCodecs.readHandPose(buffer);
-        return new GrabStartC2S(pose.hand(), pose.handPos(), pose.handDir());
+        return new GrabStartC2S(pose.hand(), pose.handPos(), pose.handDir(), pose.handRot());
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
-        GrabPayloadCodecs.writeHandPose(buffer, hand, handPos, handDir);
+        GrabPayloadCodecs.writeHandPose(buffer, hand, handPos, handDir, handRot);
     }
 
     @Override

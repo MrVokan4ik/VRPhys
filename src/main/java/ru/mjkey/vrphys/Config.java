@@ -49,5 +49,25 @@ public class Config {
             .comment("Write extra diagnostics for VR grab accept/reject/release decisions.")
             .define("debugGrabLogging", false);
 
+    public static final ModConfigSpec.DoubleValue MASS_THRESHOLD = BUILDER
+            .comment("Sub-level mass (kg) at which spring stiffness starts scaling down. Higher mass = softer effective spring.")
+            .defineInRange("massThreshold", 500.0D, 1.0D, 1_000_000.0D);
+
+    public static final ModConfigSpec.DoubleValue ANGULAR_STIFFNESS = BUILDER
+            .comment("Angular spring stiffness used to rotate the grabbed sub-level toward the VR hand orientation.")
+            .defineInRange("angularStiffness", 120.0D, 0.0D, 10_000.0D);
+
+    public static final ModConfigSpec.DoubleValue ANGULAR_DAMPING = BUILDER
+            .comment("Angular velocity damping used by the grab angular spring.")
+            .defineInRange("angularDamping", 15.0D, 0.0D, 1_000.0D);
+
+    public static final ModConfigSpec.DoubleValue MAX_TORQUE_PER_HAND = BUILDER
+            .comment("Maximum angular impulse per hand before clamping (N·m·s).")
+            .defineInRange("maxTorquePerHand", 800.0D, 0.0D, 100_000.0D);
+
+    public static final ModConfigSpec.BooleanValue ENABLE_STRESS_HAPTIC = BUILDER
+            .comment("Send spring-stress packets to the client to drive continuous haptic feedback while holding an object.")
+            .define("enableStressHaptic", true);
+
     static final ModConfigSpec SPEC = BUILDER.build();
 }

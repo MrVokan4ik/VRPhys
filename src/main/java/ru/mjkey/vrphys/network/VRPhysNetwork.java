@@ -12,6 +12,7 @@ import ru.mjkey.vrphys.network.payload.GrabAckS2C;
 import ru.mjkey.vrphys.network.payload.GrabHoldC2S;
 import ru.mjkey.vrphys.network.payload.GrabReleaseC2S;
 import ru.mjkey.vrphys.network.payload.GrabStartC2S;
+import ru.mjkey.vrphys.network.payload.GrabStressS2C;
 import ru.mjkey.vrphys.physics.VRGrabServer;
 
 import java.lang.reflect.InvocationTargetException;
@@ -50,6 +51,12 @@ public final class VRPhysNetwork {
                         (packet, context) -> {
                         }
                 ));
+        registrar.playBidirectional(GrabStressS2C.TYPE, GrabStressS2C.CODEC,
+                new DirectionalPayloadHandler<>(
+                        (packet, context) -> context.enqueueWork(() -> handleStress(packet)),
+                        (packet, context) -> {
+                        }
+                ));
     }
 
     public static void sendStart(GrabStartC2S packet) {
@@ -68,21 +75,34 @@ public final class VRPhysNetwork {
         PacketDistributor.sendToPlayer(player, packet);
     }
 
+    public static void sendStress(ServerPlayer player, GrabStressS2C packet) {
+        PacketDistributor.sendToPlayer(player, packet);
+    }
+
     private static void handleAck(GrabAckS2C packet) {
+        dispatchToClientBridge("handleAck", GrabAckS2C.class, packet);
+    }
+
+    private static void handleStress(GrabStressS2C packet) {
+        dispatchToClientBridge("handleStress", GrabStressS2C.class, packet);
+    }
+
+    private static <T> void dispatchToClientBridge(String methodName, Class<T> paramType, T arg) {
         if (FMLEnvironment.dist != Dist.CLIENT) {
             return;
         }
 
         try {
             Class<?> bridge = Class.forName(CLIENT_BRIDGE_CLASS);
-            Method method = bridge.getMethod("handleAck", GrabAckS2C.class);
-            method.invoke(null, packet);
+            Method method = bridge.getMethod(methodName, paramType);
+            method.invoke(null, arg);
         } catch (ClassNotFoundException exception) {
             VRPhys.LOGGER.debug("Vivecraft client grab bridge is not present");
         } catch (IllegalAccessException | NoSuchMethodException | InvocationTargetException exception) {
-            VRPhys.LOGGER.warn("Failed to deliver VRPhys grab acknowledgement to client bridge", exception);
+            VRPhys.LOGGER.warn("Failed to deliver VRPhys {} to client bridge", methodName, exception);
         } catch (LinkageError error) {
-            VRPhys.LOGGER.warn("VRPhys grab acknowledgement bridge could not link against Vivecraft", error);
+            VRPhys.LOGGER.warn("VRPhys client bridge could not link against Vivecraft", error);
         }
     }
 }
+

@@ -1,3 +1,6 @@
+### REF ###
+vrphys_refs/
+
 ### Gradle ###
 .gradle
 build/

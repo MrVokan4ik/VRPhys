@@ -20,6 +20,8 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import org.joml.Quaterniond;
+import org.joml.Quaternionf;
 import org.joml.Vector3d;
 import ru.mjkey.vrphys.Config;
 import ru.mjkey.vrphys.VRPhys;
@@ -30,6 +32,7 @@ import ru.mjkey.vrphys.network.payload.GrabAckS2C;
 import ru.mjkey.vrphys.network.payload.GrabHoldC2S;
 import ru.mjkey.vrphys.network.payload.GrabReleaseC2S;
 import ru.mjkey.vrphys.network.payload.GrabStartC2S;
+import ru.mjkey.vrphys.network.payload.GrabStressS2C;
 
 import java.util.Map;
 import java.util.UUID;
@@ -43,7 +46,6 @@ public final class VRGrabServer {
     private static final Map<GrabKey, GrabSession> SESSIONS = new ConcurrentHashMap<>();
 
     // VR-status cache: avoid reflection on every physics tick.
-    // Keyed by game-tick; cleared whenever the tick counter advances.
     private static final AtomicLong VR_CACHE_TICK = new AtomicLong(Long.MIN_VALUE);
     private static final Map<UUID, Boolean> VR_PLAYER_CACHE = new ConcurrentHashMap<>();
 
@@ -75,7 +77,8 @@ public final class VRGrabServer {
                 localAnchor,
                 player.serverLevel().getGameTime(),
                 packet.handPos(),
-                packet.handDir()
+                packet.handDir(),
+                packet.handRot()
         );
 
         SESSIONS.put(key, session);
@@ -95,7 +98,8 @@ public final class VRGrabServer {
             return;
         }
 
-        session.updatePose(packet.handPos(), packet.handDir(), player.serverLevel().getGameTime(), packet.sequence());
+        session.updatePose(packet.handPos(), packet.handDir(), packet.handRot(),
+                player.serverLevel().getGameTime(), packet.sequence());
     }
 
     public static void handleRelease(ServerPlayer player, GrabReleaseC2S packet) {
@@ -106,7 +110,8 @@ public final class VRGrabServer {
         }
 
         if (isFinite(packet.handPos()) && isFinite(packet.handDir())) {
-            session.updatePose(packet.handPos(), packet.handDir(), player.serverLevel().getGameTime(), session.sequence + 1);
+            session.updatePose(packet.handPos(), packet.handDir(), packet.handRot(),
+                    player.serverLevel().getGameTime(), session.sequence + 1);
         }
 
         applyThrow(player.serverLevel(), session);
@@ -116,6 +121,7 @@ public final class VRGrabServer {
 
     public static void onPhysicsTick(SubLevelPhysicsSystem physicsSystem, double timeStep) {
         ServerLevel level = physicsSystem.getLevel();
+        long gameTick = level.getGameTime();
 
         for (Map.Entry<GrabKey, GrabSession> entry : SESSIONS.entrySet()) {
             GrabSession session = entry.getValue();
@@ -130,7 +136,14 @@ public final class VRGrabServer {
                 continue;
             }
 
-            applySpring(physicsSystem, subLevel, session, timeStep);
+            float stress = applySpring(physicsSystem, subLevel, session, timeStep);
+
+            // Dispatch haptic stress packet every 2 game ticks to limit network traffic.
+            if (Config.ENABLE_STRESS_HAPTIC.getAsBoolean()
+                    && gameTick - session.lastStressGameTick >= 2L) {
+                session.lastStressGameTick = gameTick;
+                VRPhysNetwork.sendStress(player, new GrabStressS2C(session.hand, stress));
+            }
         }
     }
 
@@ -156,6 +169,10 @@ public final class VRGrabServer {
         SESSIONS.clear();
         VR_PLAYER_CACHE.clear();
     }
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
 
     private static ServerSubLevel findServerTarget(ServerPlayer player, Vec3 handPos) {
         if (!isValidPlayerPose(player, handPos, Vec3.ZERO)) {
@@ -196,12 +213,25 @@ public final class VRGrabServer {
         return VR_PLAYER_CACHE.computeIfAbsent(player.getUUID(), id -> VivecraftCompat.isVrPlayer(player));
     }
 
-    private static void applySpring(SubLevelPhysicsSystem physicsSystem, ServerSubLevel subLevel, GrabSession session, double timeStep) {
+    /**
+     * Applies linear spring-damper and angular spring-damper forces to the sub-level.
+     *
+     * @return normalized spring stress in [0, 1], where 1 means max linear force was reached.
+     */
+    private static float applySpring(SubLevelPhysicsSystem physicsSystem, ServerSubLevel subLevel,
+                                     GrabSession session, double timeStep) {
         RigidBodyHandle handle = physicsSystem.getPhysicsHandle(subLevel);
         if (handle == null || !handle.isValid()) {
-            return;
+            return 0.0f;
         }
 
+        // --- Mass-based effective stiffness ---
+        double mass = subLevel.getMassTracker().getMass();
+        double massThreshold = Config.MASS_THRESHOLD.getAsDouble();
+        double effectiveStiffness = Config.SPRING_STIFFNESS.getAsDouble()
+                / Math.max(1.0, mass / massThreshold);
+
+        // --- Linear spring-damper ---
         Vector3d anchorGlobal = subLevel.logicalPose().transformPosition(session.localAnchor, new Vector3d());
         Vector3d handPosition = toJoml(session.handPos);
         Vector3d error = handPosition.sub(anchorGlobal, new Vector3d());
@@ -212,17 +242,68 @@ public final class VRGrabServer {
         Vector3d pointVelocity = angularVelocity.cross(radius, new Vector3d()).add(linearVelocity);
         Vector3d velocityError = session.estimatedVelocity().sub(pointVelocity, new Vector3d());
 
-        Vector3d force = error.mul(Config.SPRING_STIFFNESS.getAsDouble(), new Vector3d())
+        Vector3d force = error.mul(effectiveStiffness, new Vector3d())
                 .fma(Config.SPRING_DAMPING.getAsDouble(), velocityError);
-        clamp(force, Config.MAX_FORCE_PER_HAND.getAsDouble());
 
-        if (!isFinite(force)) {
+        double maxForce = Config.MAX_FORCE_PER_HAND.getAsDouble();
+        clamp(force, maxForce);
+
+        float stress = 0.0f;
+        if (isFinite(force)) {
+            Vector3d globalImpulse = force.mul(timeStep, new Vector3d());
+            Vector3d localImpulse = subLevel.logicalPose().transformNormalInverse(globalImpulse, new Vector3d());
+            handle.applyImpulseAtPoint(session.localAnchor, localImpulse);
+            stress = (float) Math.min(1.0, force.length() / Math.max(1.0, maxForce));
+        }
+
+        // --- Angular spring-damper (wrist rotation → sub-level orientation) ---
+        if (isFiniteQuat(session.handRot) && Config.ANGULAR_STIFFNESS.getAsDouble() > 0.0) {
+            applyAngularSpring(handle, subLevel, session, angularVelocity, timeStep);
+        }
+
+        return stress;
+    }
+
+    private static void applyAngularSpring(RigidBodyHandle handle, ServerSubLevel subLevel,
+                                           GrabSession session, Vector3d currentAngularVelocity,
+                                           double timeStep) {
+        // q_error = q_target * q_current^-1 — rotation needed to reach hand orientation.
+        Quaterniond currentQ = new Quaterniond(subLevel.logicalPose().orientation());
+        Quaterniond targetQ = new Quaterniond(
+                session.handRot.x, session.handRot.y, session.handRot.z, session.handRot.w);
+        Quaterniond errorQ = targetQ.mul(currentQ.conjugate(new Quaterniond()), new Quaterniond()).normalize();
+
+        // Ensure shortest-arc (angle ≤ π).
+        if (errorQ.w < 0.0) {
+            errorQ.negate();
+        }
+
+        // Convert to axis-angle vector: angularError = axis * angle (world space).
+        double w = Math.min(1.0, errorQ.w);
+        double halfAngle = Math.acos(w);
+        double sinHalfAngle = Math.sin(halfAngle);
+        if (sinHalfAngle < 1e-9) {
+            return; // Already aligned.
+        }
+        double angle = 2.0 * halfAngle;
+        Vector3d angularError = new Vector3d(
+                errorQ.x / sinHalfAngle * angle,
+                errorQ.y / sinHalfAngle * angle,
+                errorQ.z / sinHalfAngle * angle
+        );
+
+        // Spring-damper torque in world space.
+        Vector3d torque = angularError.mul(Config.ANGULAR_STIFFNESS.getAsDouble(), new Vector3d())
+                .fma(-Config.ANGULAR_DAMPING.getAsDouble(), currentAngularVelocity);
+        clamp(torque, Config.MAX_TORQUE_PER_HAND.getAsDouble());
+
+        if (!isFinite(torque)) {
             return;
         }
 
-        Vector3d globalImpulse = force.mul(timeStep, new Vector3d());
-        Vector3d localImpulse = subLevel.logicalPose().transformNormalInverse(globalImpulse, new Vector3d());
-        handle.applyImpulseAtPoint(session.localAnchor, localImpulse);
+        // Transform to body-local space and apply.
+        Vector3d localTorque = subLevel.logicalPose().transformNormalInverse(torque, new Vector3d()).mul(timeStep);
+        handle.applyAngularImpulse(localTorque);
     }
 
     private static void applyThrow(ServerLevel level, GrabSession session) {
@@ -282,6 +363,11 @@ public final class VRGrabServer {
         return Double.isFinite(vec.x) && Double.isFinite(vec.y) && Double.isFinite(vec.z);
     }
 
+    private static boolean isFiniteQuat(Quaternionf q) {
+        return Float.isFinite(q.x) && Float.isFinite(q.y) && Float.isFinite(q.z) && Float.isFinite(q.w)
+                && (q.x != 0.0f || q.y != 0.0f || q.z != 0.0f || q.w != 0.0f);
+    }
+
     private static void clamp(Vector3d vec, double maxLength) {
         if (maxLength <= 0.0D) {
             vec.zero();
@@ -301,6 +387,10 @@ public final class VRGrabServer {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Inner types
+    // -------------------------------------------------------------------------
+
     private record GrabKey(UUID playerId, InteractionHand hand) {
     }
 
@@ -315,8 +405,12 @@ public final class VRGrabServer {
         private long previousTick;
         private Vec3 handPos;
         private Vec3 handDir;
+        /** Current target orientation of the VR controller for Angular Pull. */
+        private Quaternionf handRot;
         private long lastTick;
         private int sequence;
+        /** Last game tick on which a GrabStressS2C packet was sent. */
+        long lastStressGameTick = Long.MIN_VALUE;
 
         private GrabSession(
                 UUID playerId,
@@ -326,7 +420,8 @@ public final class VRGrabServer {
                 Vector3d localAnchor,
                 long tick,
                 Vec3 handPos,
-                Vec3 handDir
+                Vec3 handDir,
+                Quaternionf handRot
         ) {
             this.playerId = playerId;
             this.hand = hand;
@@ -337,14 +432,18 @@ public final class VRGrabServer {
             this.previousTick = tick;
             this.handPos = handPos;
             this.handDir = handDir;
+            this.handRot = handRot != null ? new Quaternionf(handRot) : new Quaternionf();
             this.lastTick = tick;
         }
 
-        private void updatePose(Vec3 handPos, Vec3 handDir, long tick, int sequence) {
+        private void updatePose(Vec3 handPos, Vec3 handDir, Quaternionf handRot, long tick, int sequence) {
             this.previousHandPos = this.handPos;
             this.previousTick = this.lastTick;
             this.handPos = handPos;
             this.handDir = handDir;
+            if (handRot != null) {
+                this.handRot.set(handRot);
+            }
             this.lastTick = tick;
             this.sequence = sequence;
         }

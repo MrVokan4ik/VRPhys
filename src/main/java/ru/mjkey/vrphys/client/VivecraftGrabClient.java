@@ -17,6 +17,8 @@ import ru.mjkey.vrphys.network.payload.GrabAckS2C;
 import ru.mjkey.vrphys.network.payload.GrabHoldC2S;
 import ru.mjkey.vrphys.network.payload.GrabReleaseC2S;
 import ru.mjkey.vrphys.network.payload.GrabStartC2S;
+import ru.mjkey.vrphys.network.payload.GrabStressS2C;
+import org.joml.Quaternionf;
 
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -47,6 +49,18 @@ public final class VivecraftGrabClient {
         MODULE.setAccepted(packet.hand(), packet.accepted());
     }
 
+    public static void handleStress(GrabStressS2C packet) {
+        if (packet.stressNormalized() > 0.01F) {
+            VRClientAPI.instance().triggerHapticPulse(
+                    VRBodyPart.fromInteractionHand(packet.hand()),
+                    0.1F, // continuous pulse for 2 ticks
+                    160.0F,
+                    packet.stressNormalized(),
+                    0.0F
+            );
+        }
+    }
+
     private static final class VRGrabInteractModule implements HeldInteractModule {
         private static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath(VRPhys.MODID, "sable_grab");
         private final Map<InteractionHand, Integer> sequences = new EnumMap<>(InteractionHand.class);
@@ -73,7 +87,7 @@ public final class VivecraftGrabClient {
             HandPose pose = readHandPose(hand, player.position());
             sequences.put(hand, 0);
             rejected.remove(hand);
-            VRPhysNetwork.sendStart(new GrabStartC2S(hand, pose.position(), pose.direction()));
+            VRPhysNetwork.sendStart(new GrabStartC2S(hand, pose.position(), pose.direction(), pose.rotation()));
             return true;
         }
 
@@ -88,7 +102,7 @@ public final class VivecraftGrabClient {
 
             HandPose pose = readHandPose(hand, player.position());
             int sequence = sequences.merge(hand, 1, Integer::sum);
-            VRPhysNetwork.sendHold(new GrabHoldC2S(hand, pose.position(), pose.direction(), sequence));
+            VRPhysNetwork.sendHold(new GrabHoldC2S(hand, pose.position(), pose.direction(), pose.rotation(), sequence));
             return true;
         }
 
@@ -96,7 +110,7 @@ public final class VivecraftGrabClient {
         public void onRelease(LocalPlayer player, InteractionHand hand) {
             Vec3 fallback = player == null ? Vec3.ZERO : player.position();
             HandPose pose = readHandPose(hand, fallback);
-            VRPhysNetwork.sendRelease(new GrabReleaseC2S(hand, pose.position(), pose.direction()));
+            VRPhysNetwork.sendRelease(new GrabReleaseC2S(hand, pose.position(), pose.direction(), pose.rotation()));
             sequences.remove(hand);
             rejected.remove(hand);
         }
@@ -116,17 +130,18 @@ public final class VivecraftGrabClient {
     private static HandPose readHandPose(InteractionHand hand, Vec3 fallbackPosition) {
         VRPose pose = VRClientAPI.instance().getPreTickWorldPose();
         if (pose == null) {
-            return new HandPose(fallbackPosition, Vec3.ZERO);
+            return new HandPose(fallbackPosition, Vec3.ZERO, new Quaternionf());
         }
 
         VRBodyPartData handData = pose.getHand(hand);
         if (handData == null) {
-            return new HandPose(fallbackPosition, Vec3.ZERO);
+            return new HandPose(fallbackPosition, Vec3.ZERO, new Quaternionf());
         }
 
-        return new HandPose(handData.getPos(), handData.getDir());
+        Quaternionf rot = new Quaternionf(handData.getRotation());
+        return new HandPose(handData.getPos(), handData.getDir(), rot);
     }
 
-    private record HandPose(Vec3 position, Vec3 direction) {
+    private record HandPose(Vec3 position, Vec3 direction, Quaternionf rotation) {
     }
 }
